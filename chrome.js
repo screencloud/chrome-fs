@@ -6,7 +6,7 @@ var p = require('path')
 var Readable = Stream.Readable
 var Writable = Stream.Writable
 
-var FILESYSTEM_DEFAULT_SIZE = 250 * 1024 * 1024	// 250MB
+var FILESYSTEM_DEFAULT_SIZE = 250 * 1024 * 1024 // 250MB
 var DEBUG = false
 
 var O_APPEND = constants.O_APPEND || 0
@@ -541,6 +541,7 @@ exports.read = function (fd, buffer, offset, length, position, callback) {
     return
   }
   if (typeof fds[fd.key] === 'undefined') {
+    // isnt this broken??? 
     fds[fd.key].readpos = 0
   }
   if (position !== null) {
@@ -583,6 +584,7 @@ exports.read = function (fd, buffer, offset, length, position, callback) {
   if (offset < fds[fd.key].readpos) {
     offset = fds[fd.key].readpos
   }
+  // what is fd? 
   var data = fd.slice(offset, offset + length)
   var fileReader = new FileReader() // eslint-disable-line
   fileReader.onload = function (evt) {
@@ -607,6 +609,7 @@ exports.read = function (fd, buffer, offset, length, position, callback) {
   }
   // no-op the onprogressevent
   fileReader.onprogress = function () {}
+
   if (fd.type === 'text/plain') {
     fileReader.readAsText(data)
   } else {
@@ -1052,7 +1055,59 @@ ReadStream.prototype._read = function (n) {
       self.emit('error', err)
     }
     self.push(data)
-    // self.once('finish', self.close)
+  // self.once('finish', self.close)
+  }
+
+  // calculate the offset so read doesn't carry too much
+  if (this.end === 0) {
+    this.end = this._readableState.highWaterMark
+  } else {
+    this.end = this.end - this.start + 1
+  }
+
+  // exports.read(this.fd, new Buffer(this.fd.size), this.start, this.end, 0, onread)
+  // exports.read(this.fd, new Buffer(this.fd.size), this.start, this.end, this.pos, onread)
+
+  var len = this._readableState.highWaterMark // Math.max(, this.end)
+  console.log('calling read', this._readableState.highWaterMark, 0, len, this.pos)
+  exports.read(this.fd, new Buffer(this._readableState.highWaterMark), 0, len, this.pos, onread)
+  this.pos += this._readableState.highWaterMark
+
+}
+
+ReadStream.prototype._readNew = function (n) {
+  if (this.fd === null) {
+    return this.once('open', function () {
+      this._read(n)
+    })
+  }
+  if (this.destroyed) {
+    return
+  }
+
+  if (this.ispaused) {
+    return
+  }
+
+  if (this.pos > this.fd.size) {
+    return this.push(null)
+  }
+
+  if (this.fd.size === 0) {
+    return this.push(null)
+  }
+  var self = this
+  // Sketchy implementation that pushes the whole file to the stream
+  // But maybe fd has a size that we can iterate to?
+  var onread = function (err, length, data) {
+    if (err) {
+      if (self.autoClose) {
+        self.destroy()
+      }
+      self.emit('error', err)
+    }
+    self.push(data)
+  // self.once('finish', self.close)
   }
 
   // calculate the offset so read doesn't carry too much
@@ -1064,6 +1119,8 @@ ReadStream.prototype._read = function (n) {
 
   // exports.read(this.fd, new Buffer(this.fd.size), this.start, this.end, 0, onread)
   exports.read(this.fd, new Buffer(this.fd.size), this.start, this.end, this.pos, onread)
+
+  // why not full size? I guess it doesnt matter since only one read!
   this.pos += this._readableState.highWaterMark
 
 }
@@ -1106,6 +1163,8 @@ function WriteStream (path, options) {
   options = options || {}
 
   Writable.call(this, options)
+
+  this.highWaterMark = this.highWaterMark || options.highWaterMark
 
   this.path = path
   this.fd = null
@@ -1158,6 +1217,8 @@ WriteStream.prototype.open = function () {
   }.bind(this))
 }
 WriteStream.prototype.totalsize = 0
+WriteStream.prototype.highWaterMark = 134217728
+WriteStream.prototype.highWaterMark = 1024 * 1024 * 10 // 134217728
 WriteStream.prototype._write = function (data, encoding, callbk) {
   if (!util.isBuffer(data)) {
     return this.emit('error', new Error('Invalid data'))
@@ -1202,7 +1263,7 @@ WriteStream.prototype._write = function (data, encoding, callbk) {
   this.currentbuffersize += data.length
   callback(null, data.length)
 
-  if (this.currentbuffersize > 134217728) {
+  if (this.currentbuffersize > this.highWaterMark) {
     this._intenalwrite()
   }
 
