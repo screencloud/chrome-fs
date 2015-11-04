@@ -446,11 +446,11 @@ exports.open = function (path, flags, mode, callback) {
   } else {
     path = resolve(path)
   }
-  console.log(path.constructor)
   flags = flagToString(flags)
   callback = makeCallback(arguments[arguments.length - 1])
   mode = modeNum(mode, 438 /* =0666 */)
   // Allow for passing of fileentries to support external fs
+
   if (isEntry) {
     if (flags.indexOf('w') > -1 || flags.indexOf('a') > -1) {
       path.createWriter(function (fileWriter) {
@@ -476,7 +476,7 @@ exports.open = function (path, flags, mode, callback) {
     window.PERSISTENT, FILESYSTEM_DEFAULT_SIZE,
     function (cfs) {
       var opts = {}
-      if (flags.indexOf('w') > -1) {
+      if (flags.indexOf('w') > -1 || flags.indexOf('a') > -1) {
         opts = {create: true}
       }
       if (flags.indexOf('x') > -1) {
@@ -495,6 +495,11 @@ exports.open = function (path, flags, mode, callback) {
               fds[fileWriter.fullPath] = {}
               fds[fileWriter.fullPath].status = 'open'
               fileWriter.key = fileWriter.fullPath
+
+              if (flags.indexOf('a') > -1) {
+                fileWriter.seek(fileWriter.length)
+              }
+
               callback(null, fileWriter)
             }, callback)
           } else {
